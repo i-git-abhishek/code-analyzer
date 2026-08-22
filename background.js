@@ -12,14 +12,43 @@
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL    = "llama-3.3-70b-versatile";
-const STORAGE_KEY   = "groqApiKey";
-const TIMEOUT_MS    = 45000; // 45 s
+const GROQ_CHAT_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_MODELS_ENDPOINT = "https://api.groq.com/openai/v1/models";
+const STORAGE_KEY = "groqApiKey";
+const TIMEOUT_MS = 45000;
+
+// Priority list: Extension will use the first active model it finds
+const PREFERRED_MODELS = [
+  "openai/gpt-oss-120b",
+  "qwen/qwen3.6-27b",
+  "llama-3.1-70b-versatile",
+];
+
+async function getBestAvailableModel(apiKey) {
+  try {
+    const res = await fetch(GROQ_MODELS_ENDPOINT, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) throw new Error("Models API failed");
+
+    const data = await res.json();
+    const activeModels = data.data.map((m) => m.id);
+
+    for (const model of PREFERRED_MODELS) {
+      if (activeModels.includes(model)) return model;
+    }
+    // Fallback if none in our list exist
+    return activeModels[0];
+  } catch (err) {
+    // Hard fallback if the API check fails entirely
+    return "openai/gpt-oss-120b";
+  }
+}
 
 // ── Normalise browser API (WebExtensions vs Chrome) ──────────────────────────
 // In MV3 service workers the global is always `chrome`; in Firefox it's `browser`.
-const _storage = (typeof browser !== "undefined" ? browser : chrome).storage.local;
+const _storage = (typeof browser !== "undefined" ? browser : chrome).storage
+  .local;
 
 // ── Message Router ────────────────────────────────────────────────────────────
 
@@ -41,7 +70,8 @@ async function handleAnalysis(payload) {
   if (!code || code.trim().length === 0) {
     return {
       success: false,
-      error: "No code was found in the editor. Write your solution first, then analyze.",
+      error:
+        "No code was found in the editor. Write your solution first, then analyze.",
     };
   }
 
@@ -57,7 +87,7 @@ async function handleAnalysis(payload) {
   let groqApiKey;
   try {
     const result = await _storage.get(STORAGE_KEY);
-    groqApiKey   = result[STORAGE_KEY];
+    groqApiKey = result[STORAGE_KEY];
   } catch (_) {
     return {
       success: false,
@@ -74,11 +104,15 @@ async function handleAnalysis(payload) {
     };
   }
 
+  // Dynamically select the model right before execution
+  const selectedModel = await getBestAvailableModel(groqApiKey);
+  
   // ── 3. Build prompts ──────────────────────────────────────────────────────
 
-  const problemLine = problemContext && problemContext.fullTitle
-    ? `Problem: ${problemContext.fullTitle}`
-    : "";
+  const problemLine =
+    problemContext && problemContext.fullTitle
+      ? `Problem: ${problemContext.fullTitle}`
+      : "";
 
   const systemPrompt = `You are an expert competitive-programming coach specialising in algorithm analysis.
 Your task is to analyse a ${language.toUpperCase()} solution and return ONLY a raw JSON object — no markdown fences, no prose, no commentary outside the JSON.
@@ -97,39 +131,39 @@ Rules:
 - "optimizations" is an array of short, actionable plain-English suggestions (1–5 items). Empty array if solution is already optimal.
 - Do NOT wrap the JSON in markdown code blocks or add any text before/after it.`;
 
-  const userPrompt =
-    [
-      problemLine,
-      `Language: ${language}`,
-      "",
-      "Code:",
-      "```",
-      code.trim(),
-      "```",
-    ]
-      .filter(Boolean)
-      .join("\n");
+  const userPrompt = [
+    problemLine,
+    `Language: ${language}`,
+    "",
+    "Code:",
+    "```",
+    code.trim(),
+    "```",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   // ── 4. Call Groq API ──────────────────────────────────────────────────────
 
   const controller = new AbortController();
-  const timeoutId  = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   let response;
   try {
-    response = await fetch(GROQ_ENDPOINT, {
+    response = await fetch(GROQ_CHAT_ENDPOINT, {
       method: "POST",
       headers: {
-        "Content-Type":  "application/json",
-        "Authorization": `Bearer ${groqApiKey.trim()}`,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${groqApiKey.trim()}`,
       },
       body: JSON.stringify({
-        model:       GROQ_MODEL,
-        temperature: 0.2,         // low temp for deterministic JSON output
-        max_tokens:  1024,
+        model: selectedModel,
+        temperature: 0.2, // low temp for deterministic JSON output
+        max_tokens: 1024,
+        response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user",   content: userPrompt   },
+          { role: "user", content: userPrompt },
         ],
       }),
       signal: controller.signal,
@@ -183,12 +217,18 @@ Rules:
   try {
     responseBody = await response.json();
   } catch (_) {
-    return { success: false, error: "Received an unreadable response from Groq." };
+    return {
+      success: false,
+      error: "Received an unreadable response from Groq.",
+    };
   }
 
   const rawContent = responseBody?.choices?.[0]?.message?.content ?? "";
   if (!rawContent.trim()) {
-    return { success: false, error: "Groq returned an empty response. Please try again." };
+    return {
+      success: false,
+      error: "Groq returned an empty response. Please try again.",
+    };
   }
 
   // Strip accidental markdown fences the model might still add
@@ -210,10 +250,14 @@ Rules:
 
   // Guarantee the fields content.js expects always exist (defensive defaults)
   const payload_out = {
-    time_complexity:  analysisData.time_complexity  ?? "N/A",
+    time_complexity: analysisData.time_complexity ?? "N/A",
     space_complexity: analysisData.space_complexity ?? "N/A",
-    bottlenecks:      Array.isArray(analysisData.bottlenecks)    ? analysisData.bottlenecks    : [],
-    optimizations:    Array.isArray(analysisData.optimizations)  ? analysisData.optimizations  : [],
+    bottlenecks: Array.isArray(analysisData.bottlenecks)
+      ? analysisData.bottlenecks
+      : [],
+    optimizations: Array.isArray(analysisData.optimizations)
+      ? analysisData.optimizations
+      : [],
   };
 
   return { success: true, data: payload_out };

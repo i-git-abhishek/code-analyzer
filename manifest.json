@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Code Analyzer",
-  "version": "2.0.0",
-  "description": "Analyzes C++ and Python competitive programming solutions using AI. Detects complexity, bottlenecks, and suggests optimizations. Bring your own Groq API key.",
+  "version": "2.1.0",
+  "description": "Analyzes C++, Python, and Java competitive programming solutions using AI. Detects complexity, bottlenecks, and suggests optimizations.",
   "permissions": [
     "activeTab",
     "storage"
@@ -17,12 +17,24 @@
     "page": "options.html",
     "open_in_tab": false
   },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "code-analyzer@local.dev",
+      "strict_min_version": "140.0"
+    }
+  },
+  "icons": {
+    "16": "icons/image16.png",
+    "48": "icons/image48.png",
+    "128": "icons/image128.png"
+  },
   "content_scripts": [
     {
       "matches": [
         "https://leetcode.com/problems/*",
         "https://codeforces.com/problemset/problem/*/*",
-        "https://codeforces.com/contest/*/problem/*"
+        "https://codeforces.com/contest/*/problem/*",
+        "https://*.codechef.com/problems/*"
       ],
       "js": [
         "content.js"
@@ -32,19 +44,5 @@
       ],
       "run_at": "document_idle"
     }
-  ],
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "code-analyzer@local.dev",
-      "strict_min_version": "140.0",
-      "data_collection_permissions": {
-        "required": ["none"]
-      }
-    }
-  },
-  "icons": {
-    "16": "icons/image16.png",
-    "48": "icons/image48.png",
-    "128": "icons/image128.png"
-  }
+  ]
 }

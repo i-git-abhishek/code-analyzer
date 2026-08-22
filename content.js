@@ -13,8 +13,9 @@
 
 const PLATFORM = (() => {
   const host = window.location.hostname;
-  if (host.includes("leetcode.com"))    return "leetcode";
-  if (host.includes("codeforces.com"))  return "codeforces";
+  if (host.includes("leetcode.com")) return "leetcode";
+  if (host.includes("codeforces.com")) return "codeforces";
+  if (host.includes("codechef.com")) return "codechef";
   return "unknown";
 })();
 
@@ -38,13 +39,15 @@ function extractCodeLeetCode() {
         if (code && code.trim().length > 0) return code;
       }
     }
-  } catch (e) { /* fall through to DOM fallback */ }
+  } catch (e) {
+    /* fall through to DOM fallback */
+  }
 
   // Fallback: scrape the rendered view lines (loses some formatting but works)
   const viewLines = document.querySelectorAll(".view-lines .view-line");
   if (viewLines.length > 0) {
     return Array.from(viewLines)
-      .map(line => line.innerText)
+      .map((line) => line.innerText)
       .join("\n");
   }
 
@@ -70,7 +73,8 @@ function getMonacoEditorInstance() {
   if (!editorEl) return null;
 
   const fiberKey = Object.keys(editorEl).find(
-    k => k.startsWith("__reactFiber") || k.startsWith("__reactInternalInstance")
+    (k) =>
+      k.startsWith("__reactFiber") || k.startsWith("__reactInternalInstance"),
   );
   if (!fiberKey) return null;
 
@@ -91,36 +95,55 @@ function getMonacoEditorInstance() {
  * The submission textarea always has id="sourceCodeTextarea" or name="source".
  */
 function extractCodeCodeforces() {
-  // Primary: hidden textarea that Codeforces uses for form submission
-  const textarea = document.querySelector(
-    "#sourceCodeTextarea, textarea[name='source'], .ace_text-input"
-  );
+  // Method 1: The hidden source textarea (often stale until submit, but check anyway)
+  const textarea = document.querySelector("#sourceCodeTextarea");
   if (textarea && textarea.value && textarea.value.trim().length > 0) {
     return textarea.value;
   }
 
-  // Fallback: CodeMirror rendered lines
-  const cmLines = document.querySelectorAll(".CodeMirror-line");
-  if (cmLines.length > 0) {
-    return Array.from(cmLines)
-      .map(line => line.innerText)
+  // Method 2: Ace Editor rendered lines (Very reliable DOM fallback)
+  const aceLines = document.querySelectorAll(".ace_line");
+  if (aceLines.length > 0) {
+    // Replace non-breaking spaces with standard spaces for clean code
+    return Array.from(aceLines)
+      .map((line) => line.innerText.replace(/\u00A0/g, " "))
       .join("\n");
   }
 
-  // Fallback: Monaco (newer CF)
-  if (window.monaco && window.monaco.editor) {
-    const models = window.monaco.editor.getModels();
-    if (models && models.length > 0) {
-      return models[models.length - 1].getValue();
-    }
+  // Method 3: Older CodeMirror fallback
+  const cmLines = document.querySelectorAll(".CodeMirror-line");
+  if (cmLines.length > 0) {
+    return Array.from(cmLines)
+      .map((line) => line.innerText)
+      .join("\n");
+  }
+
+  return null;
+}
+
+function extractCodeCodechef() {
+  // Method 1: Try React Fiber / Monaco extraction first
+  const monacoInstance = getMonacoEditorInstance();
+  if (monacoInstance) {
+    const code = monacoInstance.getValue();
+    if (code && code.trim().length > 0) return code;
+  }
+
+  // Method 2: CodeChef specific editor DOM fallback
+  const aceLines = document.querySelectorAll(".ace_line, .view-line");
+  if (aceLines.length > 0) {
+    return Array.from(aceLines)
+      .map((line) => line.innerText.replace(/\u00A0/g, " "))
+      .join("\n");
   }
 
   return null;
 }
 
 function extractCode() {
-  if (PLATFORM === "leetcode")   return extractCodeLeetCode();
+  if (PLATFORM === "leetcode") return extractCodeLeetCode();
   if (PLATFORM === "codeforces") return extractCodeCodeforces();
+  if (PLATFORM === "codechef") return extractCodeCodechef();
   return null;
 }
 
@@ -147,11 +170,19 @@ function detectLanguage() {
   if (PLATFORM === "codeforces") {
     // Codeforces uses a <select> for language choice
     const select = document.querySelector(
-      "select[name='programTypeId'], #programTypeId"
+      "select[name='programTypeId'], #programTypeId",
     );
     if (select) {
       const selectedText = select.options[select.selectedIndex]?.text || "";
       return normalizeLanguage(selectedText);
+    }
+  }
+
+  if (PLATFORM === "codechef") {
+    // Codechef language selector
+    const langSelect = document.querySelector(".select2-selection__rendered");
+    if (langSelect && langSelect.textContent.trim()) {
+      return normalizeLanguage(langSelect.textContent.trim());
     }
   }
 
@@ -161,15 +192,15 @@ function detectLanguage() {
 
 function normalizeLanguage(rawLang) {
   const lang = rawLang.toLowerCase();
-  if (lang.includes("python"))  return "python";
-  if (lang.includes("py"))      return "python";
-  if (lang.includes("c++"))     return "cpp";
-  if (lang.includes("cpp"))     return "cpp";
+  if (lang.includes("python")) return "python";
+  if (lang.includes("py")) return "python";
+  if (lang.includes("c++")) return "cpp";
+  if (lang.includes("cpp")) return "cpp";
   if (lang.includes("java") && !lang.includes("script")) return "java";
   if (lang.includes("javascript") || lang.includes("js")) return "javascript";
   if (lang.includes("typescript")) return "typescript";
-  if (lang.includes("go"))      return "go";
-  if (lang.includes("rust"))    return "rust";
+  if (lang.includes("go")) return "go";
+  if (lang.includes("rust")) return "rust";
   return rawLang.toLowerCase().replace(/\s+/g, "_");
 }
 
@@ -196,33 +227,49 @@ function extractProblemContext() {
     for (const sel of selectors) {
       const el = document.querySelector(sel);
       if (el && el.textContent.trim()) {
-        const text  = el.textContent.trim();
+        const text = el.textContent.trim();
         const match = text.match(/^(\d+)\.\s+(.+)$/);
-        if (match) return { number: match[1], title: match[2], fullTitle: text };
+        if (match)
+          return { number: match[1], title: match[2], fullTitle: text };
       }
     }
 
     // Extract number from URL slug and build title from <title> tag
     const urlMatch = window.location.pathname.match(/\/problems\/([^/]+)/);
     if (urlMatch) {
-      const slug  = urlMatch[1];
-      const title = fromTitle || slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const slug = urlMatch[1];
+      const title =
+        fromTitle ||
+        slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       return { number: "", title, fullTitle: title };
     }
 
-    if (fromTitle) return { number: "", title: fromTitle, fullTitle: fromTitle };
+    if (fromTitle)
+      return { number: "", title: fromTitle, fullTitle: fromTitle };
   }
 
   if (PLATFORM === "codeforces") {
-    const heading = document.querySelector(".problem-statement .title, .header .title");
+    const heading = document.querySelector(
+      ".problem-statement .title, .header .title",
+    );
     if (heading) {
       const text = heading.textContent.trim();
       return { number: "", title: text, fullTitle: text };
     }
-    const cfMatch = window.location.pathname.match(/\/contest\/(\d+)\/problem\/(\w+)/);
+    const cfMatch = window.location.pathname.match(
+      /\/contest\/(\d+)\/problem\/(\w+)/,
+    );
     if (cfMatch) {
       const fullTitle = `Contest ${cfMatch[1]} Problem ${cfMatch[2]}`;
       return { number: cfMatch[2], title: fullTitle, fullTitle };
+    }
+  }
+
+  if (PLATFORM === "codechef") {
+    const heading = document.querySelector("h1, .problem-title");
+    if (heading) {
+      const title = heading.textContent.trim();
+      return { number: "", title: title, fullTitle: title };
     }
   }
 
@@ -231,10 +278,10 @@ function extractProblemContext() {
 
 // ─── UI Injection ─────────────────────────────────────────────────────────────
 
-let analyzeBtn   = null;
+let analyzeBtn = null;
 let modalOverlay = null;
-let isAnalyzing  = false;   // guard against re-entrant clicks
-let removalTimer = null;    // track the in-flight removeModal setTimeout
+let isAnalyzing = false; // guard against re-entrant clicks
+let removalTimer = null; // track the in-flight removeModal setTimeout
 
 function injectAnalyzeButton() {
   // Remove stale button if the DOM was rebuilt by LeetCode's SPA router
@@ -271,14 +318,15 @@ async function onAnalyzeClick() {
   // Always re-query the button from the DOM — LeetCode's SPA can re-render it
   analyzeBtn = document.getElementById("ca-analyze-btn");
 
-  const code           = extractCode();
-  const language       = detectLanguage();
+  const code = extractCode();
+  const language = detectLanguage();
   const problemContext = extractProblemContext();
 
   if (!code || code.trim().length === 0) {
     isAnalyzing = false;
     showModal({
-      error: "No code found in the editor. Write your solution first, then click Analyze."
+      error:
+        "No code found in the editor. Write your solution first, then click Analyze.",
     });
     return;
   }
@@ -288,19 +336,22 @@ async function onAnalyzeClick() {
 
   try {
     const response = await browser.runtime.sendMessage({
-      type:    "ANALYZE_CODE",
+      type: "ANALYZE_CODE",
       payload: { code, language, problemContext },
     });
 
     if (response && response.success) {
       showModal({ result: response.data, language, problemContext });
     } else {
-      const errMsg = (response && response.error) || "Unknown error from background script.";
+      const errMsg =
+        (response && response.error) || "Unknown error from background script.";
       showModal({ error: errMsg });
     }
   } catch (err) {
     // This fires if the background script itself throws (e.g. extension context invalidated)
-    showModal({ error: `Extension error: ${err.message}. Try reloading the extension from about:debugging.` });
+    showModal({
+      error: `Extension error: ${err.message}. Try reloading the extension from about:debugging.`,
+    });
   } finally {
     // Re-query again — the DOM may have changed during the async wait
     analyzeBtn = document.getElementById("ca-analyze-btn");
@@ -334,9 +385,9 @@ function showModal({ loading, result, error, language, problemContext }) {
   // Use mousedown timestamp guard to prevent the same mouse event that opened
   // the modal (via the Analyze button) from immediately closing it via the overlay.
   let openedAt = Date.now();
-  modalOverlay.addEventListener("click", e => {
-    if (e.target !== modalOverlay) return;       // only bare overlay, not modal content
-    if (Date.now() - openedAt < 300) return;     // ignore clicks within 300ms of opening
+  modalOverlay.addEventListener("click", (e) => {
+    if (e.target !== modalOverlay) return; // only bare overlay, not modal content
+    if (Date.now() - openedAt < 300) return; // ignore clicks within 300ms of opening
     removeModal();
   });
 
@@ -346,9 +397,10 @@ function showModal({ loading, result, error, language, problemContext }) {
   // Header
   const header = document.createElement("div");
   header.className = "ca-modal-header";
-  const problemBadge = (problemContext && problemContext.number)
-    ? `<span class="ca-problem-badge">#${escapeHtml(problemContext.number)}</span>`
-    : "";
+  const problemBadge =
+    problemContext && problemContext.number
+      ? `<span class="ca-problem-badge">#${escapeHtml(problemContext.number)}</span>`
+      : "";
   header.innerHTML = `
     <div class="ca-modal-title">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -373,9 +425,10 @@ function showModal({ loading, result, error, language, problemContext }) {
   body.className = "ca-modal-body";
 
   if (loading) {
-    const problemLine = (problemContext && problemContext.fullTitle)
-      ? `<p class="ca-loading-problem">${escapeHtml(problemContext.fullTitle)}</p>`
-      : "";
+    const problemLine =
+      problemContext && problemContext.fullTitle
+        ? `<p class="ca-loading-problem">${escapeHtml(problemContext.fullTitle)}</p>`
+        : "";
     body.innerHTML = `
       <div class="ca-loading-state">
         <div class="ca-spinner"></div>
@@ -412,23 +465,22 @@ function showModal({ loading, result, error, language, problemContext }) {
 
 function buildResultHTML(result, problemContext) {
   const {
-    time_complexity  = "N/A",
+    time_complexity = "N/A",
     space_complexity = "N/A",
-    bottlenecks      = [],
-    optimizations    = [],
+    bottlenecks = [],
+    optimizations = [],
   } = result;
 
-  const problemHeader = (problemContext && problemContext.fullTitle)
-    ? `<div class="ca-problem-title">${escapeHtml(problemContext.fullTitle)}</div>`
-    : "";
+  const problemHeader =
+    problemContext && problemContext.fullTitle
+      ? `<div class="ca-problem-title">${escapeHtml(problemContext.fullTitle)}</div>`
+      : "";
 
   const renderList = (items, emptyMsg) => {
     if (!items || items.length === 0) {
       return `<li class="ca-list-empty">${escapeHtml(emptyMsg)}</li>`;
     }
-    return items
-      .map(item => `<li>${escapeHtml(String(item))}</li>`)
-      .join("");
+    return items.map((item) => `<li>${escapeHtml(String(item))}</li>`).join("");
   };
 
   return `
@@ -507,7 +559,7 @@ function escapeHtml(str) {
 
 // ─── Keyboard Shortcut ────────────────────────────────────────────────────────
 
-document.addEventListener("keydown", e => {
+document.addEventListener("keydown", (e) => {
   // Escape closes modal
   if (e.key === "Escape" && modalOverlay) {
     removeModal();
@@ -522,12 +574,13 @@ document.addEventListener("keydown", e => {
  */
 function waitForEditor(callback, maxWait = 15000) {
   const selectors = {
-    leetcode:   ".monaco-editor",
-    codeforces: "#sourceCodeTextarea, .CodeMirror, .monaco-editor",
+    leetcode: ".monaco-editor",
+    codeforces: "#editor, .ace_editor, #sourceCodeTextarea",
+    codechef: ".monaco-editor, #submit-solution, .ace_editor",
   };
   const selector = selectors[PLATFORM] || ".monaco-editor";
   const interval = 500;
-  let elapsed    = 0;
+  let elapsed = 0;
 
   const timer = setInterval(() => {
     if (document.querySelector(selector)) {
@@ -546,8 +599,10 @@ if (PLATFORM !== "unknown") {
   // LeetCode is a SPA — navigating between problems tears down and rebuilds
   // the entire React tree, removing our injected button. Watch for that.
   const navObserver = new MutationObserver(() => {
-    if (!document.getElementById("ca-analyze-btn") ||
-        !document.body.contains(document.getElementById("ca-analyze-btn"))) {
+    if (
+      !document.getElementById("ca-analyze-btn") ||
+      !document.body.contains(document.getElementById("ca-analyze-btn"))
+    ) {
       // Editor might not be ready yet after navigation — wait for it again
       waitForEditor(injectAnalyzeButton);
     }
